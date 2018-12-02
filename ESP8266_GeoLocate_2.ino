@@ -16,8 +16,14 @@ http://m0xpd.blogspot.com/2016/08/esp8266-geolocation.html
 #include <ArduinoJson.h>
 #include "ESP8266WiFi.h"
 
+int maxNetfound = 0;
+
 char myssid[] = "TOTOLINK N600R";          // your network SSID (name) 
 char mypass[] = "12345678aa";          // your network password
+
+//char myssid[] = "iPhone";          // your network SSID (name) 
+//char mypass[] = "abcd1234";          // your network password
+
 
 const char* Host = "www.googleapis.com";
 String thisPage = "/geolocation/v1/geolocate?key=";
@@ -39,9 +45,45 @@ void setup() {
   WiFi.disconnect();
   delay(100);
   Serial.println("Setup done");
+
+  // We start by connecting to a WiFi network
+  Serial.print("Connecting to ");
+  Serial.println(myssid);
+  WiFi.begin(myssid, mypass);
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+    Serial.println(".");  
+
+  maxNetfound = WiFi.scanNetworks();
+  updateGPS();
 }
 
 void loop() {
+  
+  if(WiFi.scanNetworks() > maxNetfound){
+    Serial.println("Update update GPS");
+    updateGPS();
+    maxNetfound = WiFi.scanNetworks();
+  }
+  else{
+    Serial.println("Not update GPS ");
+    Serial.print("Max network found: "); Serial.print(maxNetfound); Serial.print("  lat: "); Serial.print(latitude); Serial.print("  long: "); Serial.println(longitude);
+    delay(200);
+  }
+     
+  
+
+  // Wait for ever...
+ // while(1){
+  //delay(1000);
+  //}
+  
+}
+
+void updateGPS(){
   char bssid[6];
   DynamicJsonBuffer jsonBuffer;  
   Serial.println("scan start");
@@ -119,17 +161,7 @@ jsonString +="\"wifiAccessPoints\": [\n";
  Serial.println("");
 
  WiFiClientSecure client;
-  // We start by connecting to a WiFi network
-  Serial.print("Connecting to ");
-  Serial.println(myssid);
-  WiFi.begin(myssid, mypass);
   
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-    Serial.println(".");  
-
   //Connect to the client and make the api call
   Serial.print("Requesting URL: ");
   Serial.println("https://" + (String)Host + thisPage + "<API_Key>");
@@ -169,11 +201,6 @@ jsonString +="\"wifiAccessPoints\": [\n";
   Serial.println(latitude,6);
   Serial.print("Longitude = ");
   Serial.println(longitude,6);
-
-  // Wait for ever...
- // while(1){
-  //delay(1000);
-  //}
   
 }
 

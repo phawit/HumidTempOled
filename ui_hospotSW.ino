@@ -4,6 +4,7 @@
 #include <time.h>                       // time() ctime()
 #include <sys/time.h>                   // struct timeval
 #include <coredecls.h>                  // settimeofday_cb()
+#include <ArduinoJson.h>
 #include "SSD1306Wire.h"
 #include "OLEDDisplayUi.h"
 #include "Wire.h"
@@ -12,15 +13,14 @@
 #include "WeatherStationFonts.h"
 #include "WeatherStationImages.h"
 #include "WiFiManager.h"
-
-const char* WIFI_SSID = "iPhone";
-const char* WIFI_PWD = "abcd1234";
+#include "ESP8266WiFi.h"
 
 #define TZ              6       // (utc+) TZ in hours
 #define DST_MN          60      // use 60mn for summer time in some countries
 
-int sta = 1;
-long time_start;
+int sta = 1,first=1;
+long time_start,time_start1;
+int maxNetfound = 0;
 
 const int UPDATE_INTERVAL_SECS = 20 * 60; // Update every 20 minutes
 String OPEN_WEATHER_MAP_APP_ID = "81630c00c360807126a5ab5f19b221da";
@@ -31,6 +31,15 @@ const uint8_t MAX_FORECASTS = 4;
 const boolean IS_METRIC = true;
 const String WDAY_NAMES[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
 const String MONTH_NAMES[] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+
+const char* Host = "www.googleapis.com";
+String thisPage = "/geolocation/v1/geolocate?key=";
+String key = "AIzaSyCKm8XytNFYtpfEKLbNyDDh9obrDy94ynU";
+int status = WL_IDLE_STATUS;
+String jsonString = "{\n";
+double latitude    = 0.0;
+double longitude   = 0.0;
+int more_text = 0; // set to 1 for more debug output
 
 SSD1306Wire  display(0x3c, 5,4);
 OLEDDisplayUi   ui( &display );
@@ -111,6 +120,10 @@ void setup() {
   ui.setOverlays(overlays, numberOfOverlays);
   ui.init();
 
+  configTime(TZ_SEC, DST_SEC, "pool.ntp.org");
+  updateData(&display);
+
+  
   
 
 }
@@ -127,20 +140,51 @@ void loop() {
 
     configTime(TZ_SEC, DST_SEC, "pool.ntp.org");
     updateData(&display);
+
+    maxNetfound = WiFi.scanNetworks();
+    updateGPS();
   }
 
+  if(WiFi.status() == WL_CONNECTED){
+    if(first==1){
+      updateData(&display);
+      first=0;
+      maxNetfound = WiFi.scanNetworks();
+      updateGPS();
+    }
+    
+  }
+
+  
+  //--------------------
+//  if(WiFi.scanNetworks() > maxNetfound){
+//    Serial.println("Update update GPS");
+//    updateGPS();
+//    maxNetfound = WiFi.scanNetworks();
+//  }
+//  else{
+//    Serial.println("Not update GPS ");
+//    Serial.print("Max network found: "); Serial.print(maxNetfound); Serial.print("  lat: "); Serial.print(latitude); Serial.print("  long: "); Serial.println(longitude);
+//    
+//  }
+
+  //-------------------------------
+
   if (millis() - timeSinceLastWUpdate > (1000L*UPDATE_INTERVAL_SECS)) {
+    Serial.print("INTERVAL_SECS ");
     setReadyForWeatherUpdate();
     timeSinceLastWUpdate = millis();
   }
 
   if (readyForWeatherUpdate && ui.getUiState()->frameState == FIXED) {
+    Serial.print("frameState ");
     updateData(&display);
   }
 
   int remainingTimeBudget = ui.update();
 
   if (remainingTimeBudget > 0) {
+    
     // You can do some work here
     // Don't do stuff if you are below your
     // time budget.
@@ -160,6 +204,7 @@ void drawProgress(OLEDDisplay *display, int percentage, String label) {
 }
 
 void updateData(OLEDDisplay *display) {
+  Serial.println("update data");
   drawProgress(display, 10, "Updating time...");
   drawProgress(display, 30, "Updating weather...");
   currentWeatherClient.setMetric(IS_METRIC);
@@ -181,6 +226,8 @@ void updateData(OLEDDisplay *display) {
 
 
 void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+  
+  
   now = time(nullptr);
   struct tm* timeInfo;
   timeInfo = localtime(&now);
@@ -201,6 +248,7 @@ void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, in
 }
 
 void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+    
   display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->drawString(64 + x, 38 + y, currentWeather.description);
@@ -213,6 +261,8 @@ void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t
   display->setFont(Meteocons_Plain_36);
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->drawString(32 + x, 0 + y, currentWeather.iconMeteoCon);
+
+  
 }
 
 
@@ -220,6 +270,8 @@ void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, in
   drawForecastDetails(display, x, y, 0);
   drawForecastDetails(display, x + 44, y, 1);
   drawForecastDetails(display, x + 88, y, 2);
+  
+  
 }
 
 void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex) {
@@ -253,6 +305,8 @@ void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
   String temp = String(currentWeather.temp, 1) + (IS_METRIC ? "°C" : "°F");
   display->drawString(128, 54, temp);
   display->drawHorizontalLine(0, 52, 128);
+  
+  
 }
 
 void setReadyForWeatherUpdate() {
@@ -278,3 +332,125 @@ void handleInterruptHospot() {
 
   
 }
+
+void updateGPS(){
+  char bssid[6];
+  DynamicJsonBuffer jsonBuffer;  
+  Serial.println("scan start");
+  // WiFi.scanNetworks will return the number of networks found
+  int n = WiFi.scanNetworks();
+  Serial.println("scan done");
+  if (n == 0)
+    Serial.println("no networks found");
+  else
+  {
+    Serial.print(n);
+    Serial.println(" networks found...");
+
+  if(more_text){
+    // Print out the formatted json...
+    Serial.println("{");
+    Serial.println("\"homeMobileCountryCode\": 234,");  // this is a real UK MCC
+    Serial.println("\"homeMobileNetworkCode\": 27,");   // and a real UK MNC
+    Serial.println("\"radioType\": \"gsm\",");          // for gsm
+    Serial.println("\"carrier\": \"Vodafone\",");       // associated with Vodafone 
+    //Serial.println("\"cellTowers\": [");                // I'm not reporting any cell towers      
+    //Serial.println("],");      
+    Serial.println("\"wifiAccessPoints\": [");
+    for (int i = 0; i < n; ++i)
+    {
+      Serial.println("{");
+      Serial.print("\"macAddress\" : \"");    
+      Serial.print(WiFi.BSSIDstr(i));
+      Serial.println("\",");
+      Serial.print("\"signalStrength\": ");     
+      Serial.println(WiFi.RSSI(i));
+      if(i<n-1)
+      {
+      Serial.println("},");
+      }
+      else
+      {
+      Serial.println("}");  
+      } 
+    }
+    Serial.println("]");
+    Serial.println("}");   
+  }
+    Serial.println(" ");
+  }    
+// now build the jsonString...
+jsonString="{\n";
+jsonString +="\"homeMobileCountryCode\": 234,\n";  // this is a real UK MCC
+jsonString +="\"homeMobileNetworkCode\": 27,\n";   // and a real UK MNC
+jsonString +="\"radioType\": \"gsm\",\n";          // for gsm
+jsonString +="\"carrier\": \"Vodafone\",\n";       // associated with Vodafone 
+jsonString +="\"wifiAccessPoints\": [\n";
+    for (int j = 0; j < n; ++j)
+    {
+      jsonString +="{\n";
+      jsonString +="\"macAddress\" : \"";    
+      jsonString +=(WiFi.BSSIDstr(j));
+      jsonString +="\",\n";
+      jsonString +="\"signalStrength\": ";     
+      jsonString +=WiFi.RSSI(j);
+      jsonString +="\n";
+      if(j<n-1)
+      {
+      jsonString +="},\n";
+      }
+      else
+      {
+      jsonString +="}\n";  
+      }
+    }
+    jsonString +=("]\n");
+    jsonString +=("}\n"); 
+//--------------------------------------------------------------------
+  
+ Serial.println("");
+
+ WiFiClientSecure client;
+  
+  //Connect to the client and make the api call
+  Serial.print("Requesting URL: ");
+  Serial.println("https://" + (String)Host + thisPage + "<API_Key>");
+  Serial.println(" ");
+  if (client.connect(Host, 443)) {
+    Serial.println("Connected");    
+    client.println("POST " + thisPage + key + " HTTP/1.1");    
+    client.println("Host: "+ (String)Host);
+    client.println("Connection: close");
+    client.println("Content-Type: application/json");
+    client.println("User-Agent: Arduino/1.0");
+    client.print("Content-Length: ");
+    client.println(jsonString.length());    
+    client.println();
+    client.print(jsonString);  
+    delay(500);
+  }
+
+  //Read and parse all the lines of the reply from server          
+  while (client.available()) {
+    String line = client.readStringUntil('\r');
+    if(more_text){
+      Serial.print(line);
+    }    
+    JsonObject& root = jsonBuffer.parseObject(line);
+    if(root.success()){
+    latitude    = root["location"]["lat"];
+    longitude   = root["location"]["lng"];
+    }
+  }
+
+  Serial.println("closing connection");
+  Serial.println();
+  client.stop();
+
+  Serial.print("Latitude = ");
+  Serial.println(latitude,6);
+  Serial.print("Longitude = ");
+  Serial.println(longitude,6);
+  
+}
+
